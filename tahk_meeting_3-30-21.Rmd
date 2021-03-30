@@ -128,7 +128,95 @@ grid.arrange(n.plot, sal.plot,
 ```
 
 
+### Stan specification
 
+```{r}
+
+dff = hypdf %>%
+  mutate(year = as.integer(as.factor(year))) %>%
+  group_by(AGY_sub) %>%
+  mutate(minyear = min(year)) %>%
+  mutate(maxyear = max(year)) %>%
+  ungroup()
+
+# This section removes agencies where a random year in the middle is missing
+dff = dff %>%
+  arrange(AGY_sub)
+
+dff = dff %>%
+  group_by(AGY_sub) %>%
+  mutate(nobs = n()) %>%
+  ungroup()
+
+dff = dff %>%
+  mutate(missingyear = ifelse(nobs != maxyear - minyear + 1, 1, 0)) %>% 
+  filter(missingyear == 0) ### Removes 16 agencies 
+
+dff = dff %>%
+  mutate(AGY_sub = as.factor(AGY_sub)) %>%
+  complete(nesting(AGY_sub), year) %>%
+  mutate(agency = as.integer(AGY_sub)) %>%
+  mutate_at(names(dff)[3:6], scale) 
+
+regressors = names(dff)[3:6]
+years = 1:20
+
+# The following section makes the stan data
+# z puts the puts dff into an array form
+# Basically, for the 4 agencies, there is a time by indicator matrix
+
+z = array(0, dim=c(length(unique(dff$AGY_sub)), length(years), length(regressors))) 
+# array[agency, time, indicator]
+
+for (i in 1:length(unique(dff$AGY_sub))) {
+  for (t in 1:length(years)) {
+    for (j in 1:length(regressors)) {
+      
+      value = as.double(dff %>% filter(agency == i, year == t) %>% select(regressors[j]))
+      z[i, t, j] = value
+      
+    }
+    
+  }
+  
+}
+
+
+# Turn missing years to 0 because stan doesnt accept na (these won't actually get used)
+z[is.na(z)] = 0
+
+cap.data = list(M = length(unique(dff$AGY_sub)), Time = length(years), z = z)
+
+cap.data$N = nrow(cap.data$y)
+
+cap.data$J = length(regressors)
+
+cap.data$which_pos = 1
+
+# Create vectors with agency starting and ending times
+cap.data$start_time = dff %>%
+  group_by(AGY_sub) %>%
+  drop_na() %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(minyear)
+
+cap.data$start_time = cap.data$start_time$minyear
+
+cap.data$end_time = dff %>%
+  group_by(AGY_sub) %>%
+  drop_na() %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(maxyear)
+
+cap.data$end_time = cap.data$end_time$maxyear
+
+options(mc.cores = detectCores())
+kalman.test = stan(file = "kalman.stan", data = cap.data, iter = 5000, seed = 9495)
+shinystan::launch_shinystan()
+
+```
 
 
 
