@@ -1,0 +1,303 @@
+---
+title: 'Alex Meeting 3-30-21'
+author: "Blain Morin"
+date: "3/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE)
+library(tidyverse)
+library(rstan)
+library(parallel)
+library(ctsem)
+library(gridExtra)
+library(kableExtra)
+library(knitr)
+
+```
+
+### Overview
+
+Here, I create some hypothetical agencies for comparison sake. 
+
+I try the model with four variables:
+
+* Number of employees (expected to be positively correlated with capacity)
+* Median salary (expected to be positively correlated with capacity)
+* Length of service (positive)
+* Master's percentage (positive)
+
+We want to see how different model specifications are effective in capturing the different agency patterns that we specify.
+
+* **Agency A** is a large agency with increasing capacity across all measures.
+* **Agency B** is a large agency with decreasing capacity across all measures.
+* **Agency C** is a small agency with increasing capacity across all measures.
+* **Agency D** is a medium agency that increases across measures for the first ten years, then decreases. 
+
+### Simulated Agencies:
+
+```{r, fig.height=7, fig.width=8}
+
+set.seed(3322009)
+
+yrs = 1:20
+
+#### High capacity agency increasing
+a_n = c(1000 + 50*yrs + rnorm(20, mean = 0, sd = 100))
+a_sal = c(75000 + 1000*yrs + rnorm(20, mean = 0, sd = 2000))
+a_los = c(10 + .1*yrs + rnorm(20, mean = 0, sd = 1))
+a_ma = c(.3 + .025*yrs + rnorm(20, mean = 0, sd =.2))
+a_ma = ifelse(a_ma<=0, 0, a_ma)
+a_los = ifelse(a_los<=0, 0, a_los)
+
+#### High capacity agency decreasing
+b_n = c(1000 - 50*yrs + rnorm(20, mean = 0, sd = 100))
+b_sal = c(75000 - 1000*yrs + rnorm(20, mean = 0, sd = 2000))
+b_los = c(10 - .1*yrs + rnorm(20, mean = 0, sd = 1))
+b_ma = c(.3 - .025*yrs + rnorm(20, mean = 0, sd =.2))
+b_ma = ifelse(b_ma<=0, 0, b_ma)
+b_los = ifelse(b_los<=0, 0, b_los)
+
+#### Small agency increasing
+c_n = c(50 + 10*yrs + rnorm(20, mean = 0, sd = 30))
+c_sal = c(55000 + 500*yrs + rnorm(20, mean = 0, sd = 2000))
+c_los = c(3 + .17*yrs + rnorm(20, mean = 0, sd = 1))
+c_ma = c(.1 + .025*yrs + rnorm(20, mean = 0, sd =.2))
+c_ma = ifelse(c_ma<=0, 0, c_ma)
+c_los = ifelse(c_los<=0, 0, c_los)
+
+
+#### Small agency increasing then decreasing
+d_n = c(500 + 50*yrs - 3*yrs^2 + rnorm(20, mean = 0, sd = 45))
+d_sal = c(55000 + 500*yrs - 15*yrs^2 + rnorm(20, mean = 0, sd = 800))
+d_los = c(3 + .17*yrs - .007*yrs^2 + rnorm(20, mean = 0, sd = .3))
+d_ma = c(.1 + .025*yrs - .001*yrs^2 + rnorm(20, mean = 0, sd =.01))
+d_ma = ifelse(d_ma<=0, 0, d_ma)
+d_los = ifelse(d_los<=0, 0, d_los)
+
+
+hypdf = data.frame(AGY_sub = rep(c('a', 'b', 'c', 'd'), each = 20),
+  year = rep(1:20, 4),
+  n = c(a_n, b_n, c_n, d_n),
+  med_sal = c(a_sal, b_sal, c_sal, d_sal),
+  los = c(a_los, b_los, c_los, d_los),
+  ma = c(a_ma, b_ma, c_ma, d_ma))
+
+n.plot = hypdf %>%
+  ggplot(aes(x = year, y = n)) +
+  geom_point(aes(color = AGY_sub)) +
+  geom_smooth(aes(color = AGY_sub)) +
+  ylab("Number of Employees") +
+  xlab("Year") +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+sal.plot = hypdf %>%
+  ggplot(aes(x = year, y = med_sal)) +
+  geom_point(aes(color = AGY_sub)) +
+  geom_smooth(aes(color = AGY_sub)) +
+  ylab("Median Salary") +
+  xlab("Year") +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+los.plot = hypdf %>%
+  ggplot(aes(x = year, y = los)) +
+  geom_point(aes(color = AGY_sub)) +
+  geom_smooth(aes(color = AGY_sub)) +
+  ylab("Ave. Length of Service") +
+  xlab("Year") +
+  theme_minimal() + 
+  theme(legend.position = "none")
+
+ma.plot = hypdf %>%
+  ggplot(aes(x = year, y = ma)) +
+  geom_point(aes(color = AGY_sub)) +
+  geom_smooth(aes(color = AGY_sub)) +
+  ylab("Master's %") +
+  xlab("Year") +
+  theme_minimal() + 
+  theme(legend.position = "none")
+
+grid.arrange(n.plot, sal.plot,
+             los.plot, ma.plot,
+             nrow = 2)
+
+```
+
+
+
+
+
+
+### Two variable result (n and salary)
+
+```{r, fig.height=7, fig.width=8, results='hide'}
+
+set.seed(23456)
+
+hypdf.scaled = hypdf %>%
+  mutate_at(names(hypdf)[3:6], scale) %>%
+  mutate(id = as.integer(as.factor(AGY_sub))) %>%
+  rename(time = year)
+
+
+model1 = ctModel(type='standt', LAMBDA=matrix(1, nrow = 2, ncol = 1),
+               n.manifest=2, manifestNames = names(hypdf)[3:4],
+               n.latent=1, latentNames=c('capacity'), CINT = "slope")
+
+fit1 = ctStanFit(hypdf.scaled, model1, chains = 4, iterations = 2000)
+
+#summary(fit1)
+
+ctKalman(fit1, plot = TRUE, subjects = (1:4), kalmanvec = c("etaprior", "etasmooth", "y", "yprior")) 
+
+
+
+
+```
+
+### Four variable result
+
+```{r, fig.height=7, fig.width=8, results='hide'}
+
+set.seed(23)
+
+hypdf.scaled = hypdf %>%
+  mutate_at(names(hypdf)[3:6], scale) %>%
+  mutate(id = as.integer(as.factor(AGY_sub))) %>%
+  rename(time = year)
+
+
+model2 = ctModel(type='standt', LAMBDA=matrix(1, nrow = 4, ncol = 1),
+               n.manifest=4, manifestNames = names(hypdf)[3:6],
+               n.latent=1, latentNames=c('capacity'), CINT = 'slope')
+
+fit2 = ctStanFit(hypdf.scaled, model2, chains = 4, iterations = 2000)
+
+ctKalman(fit2, plot = TRUE, subjects = (1:4), kalmanvec = c("etaprior", "etasmooth", "y", "yprior")) 
+
+# summary(fit2)
+
+# ctModelLatex(fit2, digits = 4, folder = "./", filename = "sim_model")
+
+```
+
+### Apply this model to observed agencies
+
+```{r}
+
+fed = read.csv("https://www.dropbox.com/s/xtt4emmz6txtbun/fed_agency_capacity_autonomy.csv?dl=1")
+
+set.seed(123452)
+
+### Data Clean
+df = fed %>%
+  filter(yr != 1973) %>%
+  filter(yr >= 1974) %>%
+  filter(med_sal_ > 0) %>% 
+  filter(n > 5) %>%
+  drop_na(med_sal_) %>%
+  filter(AGYSUB != "TOTL")%>% ### Removes Total Columns 
+  filter(!grepl("NET", agy_full)) %>% ### Removes any total agency counts, ie only individual agencies are left
+  mutate(logMA_pct = log(ma_pct + 1)) %>%
+  mutate(logLST_pct = log(LST_pct + 1)) %>%
+  mutate(logAIN_pct = log(AIN_pct + 1)) %>%
+  mutate(logPHDpct = log(doc_pct + 1)) %>%
+  mutate(logn = log(n)) 
+
+```
+
+```{r, echo = TRUE}
+
+set.seed(123452)
+years = 1980:2009
+setagency = c("AG16", "IN15", "EP00", "HE36")
+regressors = c("n", "med_sal_", "LOSavg", "ma_pct")
+
+```
+
+```{r}
+
+dff = df %>%
+  filter(yr %in% years) %>%
+  mutate_at(regressors, scale) %>%
+  filter(AGYSUB %in% setagency) %>%
+  select(regressors, yr, AGYSUB, agy_typ) %>%
+  mutate(AGYSUB = as.factor(AGYSUB)) %>%
+  mutate(yr = as.factor(yr)) %>%
+  drop_na()
+
+```
+
+#### Recap 4 Agency Trends
+
+```{r, fig.height=8, fig.width=10}
+
+a = dff %>%
+  ggplot(aes(x = yr, y = n)) +
+  geom_line(aes(group = AGYSUB, color = AGYSUB)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90)) + 
+  ggtitle("n Employees")
+
+b = dff %>%
+  ggplot(aes(x = yr, y = med_sal_)) +
+  geom_line(aes(group = AGYSUB, color = AGYSUB)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90)) + 
+  ggtitle("Median Salary")
+
+c = dff %>%
+  ggplot(aes(x = yr, y = LOSavg)) +
+  geom_line(aes(group = AGYSUB, color = AGYSUB)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90)) + 
+  ggtitle("Avg Length of Service")
+
+d = dff %>%
+  ggplot(aes(x = yr, y = ma_pct)) +
+  geom_line(aes(group = AGYSUB, color = AGYSUB)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90)) + 
+  ggtitle("Master's %")
+
+grid.arrange(a, b, c, d, nrow = 2)
+
+```
+
+
+### Model Results
+
+```{r, fig.height=7, fig.width=8, results='hide'}
+
+set.seed(30)
+
+dff = df %>%
+  filter(yr %in% years) %>%
+  mutate_at(regressors, scale) %>%
+  filter(AGYSUB %in% setagency) %>%
+  select(regressors, yr, AGYSUB, agy_typ) %>%
+  mutate(AGYSUB = as.factor(AGYSUB)) %>%
+  mutate(yr = as.factor(yr)) %>%
+  drop_na()
+
+
+
+model1<-ctModel(type='standt', LAMBDA=matrix(1, nrow = 4, ncol = 1),
+               n.manifest=4, manifestNames=regressors,
+               n.latent=1, latentNames=c('capacity'), CINT = 'slope')
+
+dff = dff %>%
+  mutate(id = as.integer(as.factor(AGYSUB))) %>%
+  mutate(time = as.integer(as.factor(yr)))
+
+fit3 = ctStanFit(dff, model1, chains = 4, iterations = 2000)
+
+ctKalman(fit3, plot = TRUE, subjects = (1:4), kalmanvec = c("etaprior", "etasmooth", "y", "yprior")) 
+
+```
+
+1 = FDA, 2 = US Fish and Wildlife, 3 = Natural Resource Conservation Service, 4 = EPA
