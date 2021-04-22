@@ -38,7 +38,8 @@ minemployee = 5
 chains = 2
 iterations = 2000
 
-# Want to output a pdf of model results?
+# Want to output a pdf of model results? 
+# This output to your working directory
 wantpdf = TRUE
 
 # Want summary of model?
@@ -117,6 +118,24 @@ fit = ctStanFit(datalong = dff,
                 iterations = iterations) # Specified in input selection
 
 
+# Outputs model pdf if wanted
+if (wantpdf == TRUE) {
+  
+  ctModelLatex(fit,
+               digits = 3,
+               folder = "./",
+               filename = "modelresults",
+               textsize = "small")
+  
+}
 
+if (wantplot == TRUE) {
+  
+  ctKalman(fit, 
+           plot = TRUE, 
+           subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+           kalmanvec = c("etasmooth", "y", "yprior")) 
+  
+}
 
 
