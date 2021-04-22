@@ -40,7 +40,7 @@ ui <- fluidPage(
 
     # Application title
     titlePanel("Make Dynamic Models"),
-    h3("Here you can select different manifest variables
+    h4("Here you can select different manifest variables
        for the latent model.\n It's quite slow (especially with a large year range)."),
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
@@ -134,43 +134,8 @@ server <- function(input, output) {
 
     output$plot = renderPlot({
         
-        set.seed(123452)
-        years = input$years[1]:input$years[2]
-        regressors = input$regressors
-        lambdas = c(1)
-        manifest = c(0)
-        for (i in 2:length(regressors)) {
-            
-            temp = paste0("lambda", i)
-            temp2 = paste0("manifestmean", i)
-            lambdas[i] = temp
-            manifest[i] = temp2
-        }
-        
-        
-        dff = env %>%
-            filter(yr %in% years) %>%
-            mutate_at(regressors, scale) %>%
-            select(regressors, yr, AGYSUB) %>%
-            drop_na()
-        
-        model1<-ctModel(type='stanct',
-                        LAMBDA=matrix(lambdas, nrow = length(regressors), ncol = 1),
-                        n.manifest=length(regressors),
-                        manifestNames = regressors,
-                        MANIFESTMEANS = matrix(manifest,
-                                               nrow = length(regressors),
-                                               ncol = 1),
-                        n.latent=1,
-                        latentNames=c('capacity'),
-                        CINT = matrix('cint'),
-                        id = "AGYSUB",
-                        time = "yr")
-        
-        
-        fit3 = ctStanFit(datalong = dff, ctstanmodel = model1, chains = 2, iterations = 2000)
-        
-        ctKalman(fit3, 
+       fit4 = reactive(fit3)
+        ctKalman(fit4, 
                  plot = TRUE, 
                  subjects = (1:length(unique(env$AGYSUB))), 
                  kalmanvec = c("etasmooth", "y", "ysmooth")) 
