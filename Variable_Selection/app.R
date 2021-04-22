@@ -49,7 +49,8 @@ ui <- fluidPage(
                         "Year Range:",
                         min = 1974,
                         max = 2019,
-                        value = c(1980, 1990)),
+                        value = c(1980, 1990),
+                        sep = ""),
             
             checkboxGroupInput("regressors",
                                "Choose Regressors",
@@ -66,13 +67,18 @@ ui <- fluidPage(
                                  "Gini" = "gini"),
                                selected = c("n",
                                             "ma_pct",
-                                            "med_sal_"))
+                                            "med_sal_")),
+            
+            submitButton("Submit", icon("refresh"))
             
         ),
+        
+        
 
         # Show a plot of the generated distribution
         mainPanel(
-           plotOutput("distPlot")
+            verbatimTextOutput("test"),
+           plotOutput("distPlot", height = "800px")
         )
     )
 )
@@ -80,15 +86,57 @@ ui <- fluidPage(
 # Define server logic required to draw a histogram
 server <- function(input, output) {
     
+    set.seed(123452)
+    
+    output$test = renderPrint({
+        
+        
+        years = input$years[1]:input$years[2]
+        regressors = input$regressors
+        lambdas = c(1)
+        manifest = c(0)
+        for (i in 2:length(regressors)) {
+            
+            temp = paste0("lambda", i)
+            temp2 = paste0("manifestmean", i)
+            lambdas[i] = temp
+            manifest[i] = temp2
+        }
+        
+        
+        dff = env %>%
+            filter(yr %in% years) %>%
+            mutate_at(regressors, scale) %>%
+            select(regressors, yr, AGYSUB) %>%
+            drop_na()
+        
+        model1<-ctModel(type='stanct',
+                        LAMBDA=matrix(lambdas, nrow = length(regressors), ncol = 1),
+                        n.manifest=length(regressors),
+                        manifestNames = regressors,
+                        MANIFESTMEANS = matrix(manifest,
+                                               nrow = length(regressors),
+                                               ncol = 1),
+                        n.latent=1,
+                        latentNames=c('capacity'),
+                        CINT = matrix('cint'),
+                        id = "AGYSUB",
+                        time = "yr")
+        
+        
+        fit3 = ctStanFit(datalong = dff, ctstanmodel = model1, chains = 2, iterations = 2000)
+        
+        summary(fit3)
+        
+        
+    })
     
 
     output$distPlot <- renderPlot({
-        # generate bins based on input$bins from ui.R
-        x    <- faithful[, 2]
-        bins <- seq(min(x), max(x), length.out = 4 + 1)
-
-        # draw the histogram with the specified number of bins
-        hist(x, breaks = bins, col = 'darkgray', border = 'white')
+        ctKalman(fit3, 
+                 plot = TRUE, 
+                 subjects = (1:length(unique(env$AGYSUB))), 
+                 kalmanvec = c("etaprior", "y", "yprior")) 
     })
 }
 
