@@ -1,5 +1,8 @@
 
-### Required Packages
+### Required ctsem
+require(ctsem) == T || install.packages("ctsem")
+
+### Load Packages
 library(tidyverse)
 library(ctsem)
 
@@ -12,7 +15,7 @@ fed = read.csv("https://www.dropbox.com/s/xtt4emmz6txtbun/fed_agency_capacity_au
 #############   Run the Script from here      ###############
 ###########################################################
 
-set.seed(123444421112) # Important!
+set.seed(3710) # Important!
 
 ##########################
 ### Choose Inputs Here ###
@@ -20,7 +23,7 @@ set.seed(123444421112) # Important!
 
 # Choose Year Range
 startyear = 1980 # Needs to be >=1974
-endyear = 1990 # Needs to be <=2019
+endyear = 2010 # Needs to be <=2019
 
 # Choose Agency Type
 agencytype = c("Natural Resources and Environment")
@@ -28,7 +31,7 @@ agencytype = c("Natural Resources and Environment")
 #                "Health")
 
 # Choose Manifest Variables 
-regressors = c("b18_roll", "ma_pct", "LOSavg", "med_sal_")
+regressors = c("b18_roll", "LOSavg", "med_sal_")
 # names(fed)
 
 # Choose Minimum Employee Size
@@ -36,7 +39,7 @@ minemployee = 5
 
 # Choose Chains and Iterations
 chains = 2
-iterations = 2000
+iterations = 4000
 
 # Want to output a pdf of model results? 
 # This output to your working directory
@@ -129,12 +132,20 @@ if (wantpdf == TRUE) {
   
 }
 
+
+# Output model fit plots if wanted
 if (wantplot == TRUE) {
   
   ctKalman(fit, 
            plot = TRUE, 
            subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
-           kalmanvec = c("etasmooth", "y", "yprior")) 
+           kalmanvec = c("etasmooth", "y", "ysmooth")) 
+  
+}
+
+if (wantsummary == TRUE) {
+  
+  summary(fit)
   
 }
 
