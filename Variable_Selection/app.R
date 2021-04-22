@@ -49,7 +49,7 @@ ui <- fluidPage(
                         "Year Range:",
                         min = 1974,
                         max = 2019,
-                        value = c(1980, 1990),
+                        value = c(1980, 2000),
                         sep = ""),
             
             checkboxGroupInput("regressors",
@@ -77,20 +77,19 @@ ui <- fluidPage(
 
         # Show a plot of the generated distribution
         mainPanel(
-            verbatimTextOutput("test"),
-           plotOutput("distPlot", height = "800px")
+            verbatimTextOutput("rout"),
+           plotOutput("plot", height = "800px")
         )
     )
 )
 
 # Define server logic required to draw a histogram
 server <- function(input, output) {
+  
     
-    set.seed(123452)
-    
-    output$test = renderPrint({
+    output$rout = renderPrint({
         
-        
+        set.seed(123452)
         years = input$years[1]:input$years[2]
         regressors = input$regressors
         lambdas = c(1)
@@ -132,12 +131,52 @@ server <- function(input, output) {
     })
     
 
-    output$distPlot <- renderPlot({
+    output$plot = renderPlot({
+        
+        set.seed(123452)
+        years = input$years[1]:input$years[2]
+        regressors = input$regressors
+        lambdas = c(1)
+        manifest = c(0)
+        for (i in 2:length(regressors)) {
+            
+            temp = paste0("lambda", i)
+            temp2 = paste0("manifestmean", i)
+            lambdas[i] = temp
+            manifest[i] = temp2
+        }
+        
+        
+        dff = env %>%
+            filter(yr %in% years) %>%
+            mutate_at(regressors, scale) %>%
+            select(regressors, yr, AGYSUB) %>%
+            drop_na()
+        
+        model1<-ctModel(type='stanct',
+                        LAMBDA=matrix(lambdas, nrow = length(regressors), ncol = 1),
+                        n.manifest=length(regressors),
+                        manifestNames = regressors,
+                        MANIFESTMEANS = matrix(manifest,
+                                               nrow = length(regressors),
+                                               ncol = 1),
+                        n.latent=1,
+                        latentNames=c('capacity'),
+                        CINT = matrix('cint'),
+                        id = "AGYSUB",
+                        time = "yr")
+        
+        
+        fit3 = ctStanFit(datalong = dff, ctstanmodel = model1, chains = 2, iterations = 2000)
+        
         ctKalman(fit3, 
                  plot = TRUE, 
                  subjects = (1:length(unique(env$AGYSUB))), 
-                 kalmanvec = c("etaprior", "y", "yprior")) 
+                 kalmanvec = c("etasmooth", "y", "yprior")) 
+        
+        
     })
+    
 }
 
 # Run the application 
