@@ -40,7 +40,8 @@ ui <- fluidPage(
 
     # Application title
     titlePanel("Make Dynamic Models"),
-
+    h3("Here you can select different manifest variables
+       for the latent model.\n It's quite slow (especially with a large year range)."),
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
@@ -49,7 +50,7 @@ ui <- fluidPage(
                         "Year Range:",
                         min = 1974,
                         max = 2019,
-                        value = c(1980, 2000),
+                        value = c(1980, 1990),
                         sep = ""),
             
             checkboxGroupInput("regressors",
@@ -172,7 +173,7 @@ server <- function(input, output) {
         ctKalman(fit3, 
                  plot = TRUE, 
                  subjects = (1:length(unique(env$AGYSUB))), 
-                 kalmanvec = c("etasmooth", "y", "yprior")) 
+                 kalmanvec = c("etasmooth", "y", "ysmooth")) 
         
         
     })
