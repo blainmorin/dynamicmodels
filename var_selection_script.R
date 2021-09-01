@@ -1,29 +1,38 @@
+##############################################################
+######### Use this to test different model specs #############
+####### It returns the model pdf, plot, and summary ##########
+##############################################################
 
-### Required ctsem
+
+### Required packages
 require(ctsem) == T || install.packages("ctsem")
+require(shinystan) == T || install.packages("shinystan")
 
 ### Load Packages
 library(tidyverse)
 library(ctsem)
+library(shinystan)
+library(rstan)
 
 ### Data
 fed = read.csv("https://www.dropbox.com/s/xtt4emmz6txtbun/fed_agency_capacity_autonomy.csv?dl=1")
 
 
-###############################################################
-############ After Loading data and packages, ##############
-#############   Run the Script from here      ###############
-###########################################################
+##############################################################
+############ After Loading data and packages, ################
+#############   Run the Script from here      ################
+############## to avoid Loading Data Again   #################
+##############################################################
 
 set.seed(3710) # Important!
 
-##########################
-### Choose Inputs Here ###
-##########################
+#############################################################
+### Choose Inputs Here ######################################
+#############################################################
 
 # Choose Year Range
-startyear = 1980 # Needs to be >=1974
-endyear = 2010 # Needs to be <=2019
+startyear = 2000 # Needs to be >=1974
+endyear = 2005 # Needs to be <=2019
 
 # Choose Agency Type
 agencytype = c("Natural Resources and Environment")
@@ -31,15 +40,15 @@ agencytype = c("Natural Resources and Environment")
 #                "Health")
 
 # Choose Manifest Variables 
-regressors = c("b18_roll", "LOSavg", "med_sal_")
+regressors = c("n", "b18_roll", "ma_ed")
 # names(fed)
 
 # Choose Minimum Employee Size
 minemployee = 5
 
 # Choose Chains and Iterations
-chains = 2
-iterations = 4000
+chains = 3
+iterations = 300
 
 # Want to output a pdf of model results? 
 # This output to your working directory
@@ -51,9 +60,10 @@ wantsummary = TRUE
 # Want the kalman plot?
 wantplot = TRUE
 
-###############################################################
-###################################################
-###########################################
+#############################################################
+### End of Input Selection ##################################
+#############################################################
+
 
 # Data Clean
 df = fed %>%
@@ -65,7 +75,6 @@ df = fed %>%
 
 # Data Process
 years = startyear:endyear
-
 dff = df %>%
   filter(agy_typ %in% agencytype) %>%
   filter(yr %in% startyear:endyear) %>%
@@ -75,7 +84,6 @@ dff = df %>%
   
 ## Make Strings for the model
 ## based on the number of regressors
-
 lambdas = c(1)
 manifest = c(0)
 for (i in 2:length(regressors)) {
@@ -118,7 +126,9 @@ model<-ctModel(type='stanct', # Specify continuous time (can also be discrete)
 fit = ctStanFit(datalong = dff,
                 ctstanmodel = model,
                 chains = chains, # Specified in input selection
-                iterations = iterations) # Specified in input selection
+                iter = iterations, # Specified in input selection
+                optimize = FALSE,
+                nopriors = FALSE) 
 
 
 # Outputs model pdf if wanted
@@ -149,4 +159,6 @@ if (wantsummary == TRUE) {
   
 }
 
+check = fit$stanfit
 
+launch_shinystan(check)
