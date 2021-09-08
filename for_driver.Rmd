@@ -1,0 +1,42 @@
+---
+title: "For Driver"
+author: "Blain Morin"
+date: "9/8/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(ctsem)
+library(rstan)
+
+
+```
+
+## Example: Expertise of Government Agencies
+
+Using employment data from federal government agencies in the United States, we are trying to model expertise over time. "Expertise" is not directly observed. Instead we see expressions of the concept through, for example, education and salary levels. 
+
+* **Goal:** Model expertise of government agencies over time. 
+* *Latent Variable:* 
+  * Expertise
+* *Manifest Variables:* 
+  * Percentage of employees with at least a master's degree
+  * Median salary of the agency
+  
+## Exploratory Test Data
+
+The data are in long form. As a simple test, we have 11 environmental agencies over a three year period. In this case, we have observations for each agency, every year.  
+
+
+```{r}
+
+
+
+
+```
+
+
