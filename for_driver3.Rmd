@@ -1,0 +1,211 @@
+---
+title: "*ctsem* Advice Updated"
+author: "Blain Morin"
+date: "10/11/2021"
+output: pdf_document
+header-includes:
+   - \usepackage{geometry}
+   - \usepackage{placeins}
+   - \usepackage{amsmath} 
+   - \usepackage{bm}
+   - \usepackage{lscape}
+   - \usepackage{rotating}
+   - \newcommand{\vect}[1]{\boldsymbol{\mathbf{#1}}}
+   - \newcommand{\blandscape}{\begin{landscape}}
+   - \newcommand{\elandscape}{\end{landscape}}
+---
+
+# One-sentence summary
+
+We are interested in measuring the latent capacity and automony of federal agencies over time.
+
+# Why capacity and autonomy?
+
+* *Capacity*: Ability of the state to induce residents, firms, and organizations to act in ways they would otherwise not.
+
+* *Autonomy*: Measures the politicization of the bureaucracy. How much control do elected officials have over bureaucrats?
+
+* These characteristics may be associated with governance outcomes.
+
+  * Ex.) Are capacity and automony of the Environmental Protection Agency related to their enforment work?
+
+* Is there hetergeneity across agencies?
+
+  * Ex.) Has the environmental state been hollowed out during the last few years?
+
+* Call in the political science literature for better conceptual clarity and measurement of these latent characteristics.
+
+* Prior work is cross-sectional. Need to understand how capacity and autonomy interact. 
+
+# Data
+
+* Have employment data for all federal agencies for about the past 40 years
+
+* Can observe characteristics such as years of service, education level, and salary of individual employees at every agency
+
+* Group these observations to the agency,year to get measures such as \% of employees with a master's degree or higher or average length of service (*our manifest variables*).
+
+* Able to replicate others' work on measurement, or propose our own list of relevant manifest variables. 
+
+
+# Simple Test Set
+
+* Starting simple, I first try to model capacity using two manifest variables, *\% of employees at an agency who have a master's degree or higher* and *median salary at the agency*   
+* Only larger Environmental Agencies where the number of employees > 5000
+* 30 years
+* See Table 1: we have 11 agencies, each with a fully balanced 30 observations
+
+\FloatBarrier
+
+```{r setup, include=FALSE}
+
+### Document Settings
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, cache = TRUE)
+
+### Packages
+library(tidyverse)
+library(ctsem)
+library(rstan)
+library(kableExtra)
+
+### Raw Data
+fed = read.csv("https://www.dropbox.com/s/xtt4emmz6txtbun/fed_agency_capacity_autonomy.csv?dl=1")
+
+### Set Seed
+set.seed(3710)
+
+
+```
+
+```{r}
+
+# Choose Year Range
+startyear = 1981 # Needs to be >=1974
+endyear = 2010 # Needs to be <=2019
+
+# Choose Agency Type
+agencytype = c("Natural Resources and Environment")
+# agencytype = c("Natural Resources and Environment",
+#                "Health")
+
+# Choose Manifest Variables 
+regressors = c("ma_pct", "med_sal_")
+# names(fed)
+
+# Choose Minimum Employee Size
+minemployee = 5000
+
+
+```
+
+```{r}
+
+# Data Clean
+df = fed %>%
+  filter(yr >= 1974) %>%
+  filter(med_sal_ > 0) %>% 
+  filter(n > minemployee) %>%
+  drop_na(med_sal_) %>% ### Am dropping NA here, but may not need to with ctsem
+  filter(AGYSUB != "TOTL") %>% ### Removes Total Rows 
+  filter(!grepl("NET", agy_full)) ### Removes any total agency counts, ie only individual agencies are left
+
+# Data Process
+years = startyear:endyear
+dff = df %>%
+  filter(agy_typ %in% agencytype) %>%
+  filter(yr %in% startyear:endyear) %>%
+  select(regressors, yr, AGYSUB, agy_full) %>%
+  mutate_at(regressors, scale) %>%
+  drop_na() ### Again, dropping NA here, but may not need to
+
+check = dff %>%
+  group_by(agy_full, AGYSUB) %>%
+  summarise(n_obs = n())
+
+kbl(check, caption = "Agencies and Number of Observations for 1991 - 2010", booktabs = TRUE, linesep = "")
+
+```
+
+# Discussion: Identifiablility
+Prior experience is nudging me towards the idea in order to make the latent solution identifiable, that we need to set the *scale* and *location* of the latent variable. In order to set the scale, I force the first $\Lambda_{1,1} = 1$. In order to set the location, I force the first $manifestmean[1,1] = 0$.
+
+* Question: Is this identification correct?
+* Since the manifest variables are scaled, should I force all manifest means in the estimation to 0?
+
+# Discussion: Order of Regressors
+
+One possible problem is that the order of the regressors seems to impact the model results. For example, in the following section, I run the same model but only change the order of the regressors:
+
+## Model 1: Median Salary First, MA \% second 
+
+```{r}
+
+## Make Strings for the model
+## based on the number of regressors
+lambdas = c(1)
+manifest = c(0)
+for (i in 2:length(regressors)) {
+  
+  temp = paste0("lambda", i)
+  temp2 = paste0("manifestmean", i)
+  lambdas[i] = temp
+  manifest[i] = temp2
+}
+
+```
+
+
+
+```{r, echo = TRUE}
+
+regressors = c("med_sal_", "ma_pct")
+
+# The is the model specification
+model = ctModel(type='stanct', 
+               
+               LAMBDA=matrix(lambdas,
+                             nrow = length(regressors), 
+                             ncol = 1), # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               MANIFESTMEANS = matrix(manifest,
+                                      nrow = length(regressors), 
+                                      ncol = 1), # Forcing the first mean to be 0
+               
+               n.latent=1,
+               
+               latentNames=c('capacity'),
+               
+               CINT = matrix('cint'),
+               
+               id = "agy_full",
+               
+               time = "yr")
+
+```
+
+\FloatBarrier
+
+```{r}
+
+fit = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit,textsize = 'small',compile = FALSE, equationonly = TRUE))
+cat('\\caption{Both on}
+\\label{fig:ctmodellatexout}
+\\end{sidewaysfigure}') 
+
+```
