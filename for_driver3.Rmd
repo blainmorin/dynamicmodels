@@ -50,9 +50,13 @@ We are interested in measuring the latent capacity and automony of federal agenc
 
 # Simple Test Set
 
-* Starting simple, I first try to model capacity using two manifest variables, *\% of employees at an agency who have a master's degree or higher* and *median salary at the agency*   
+
+* Starting simple, I first try to model capacity using two manifest variables, *\% of employees at an agency who have a master's degree or higher* and *median salary at the agency*  
+
 * Only larger Environmental Agencies where the number of employees > 5000
+
 * 30 years
+
 * See Table 1: we have 11 agencies, each with a fully balanced 30 observations
 
 \FloatBarrier
@@ -132,9 +136,9 @@ Prior experience is nudging me towards the idea in order to make the latent solu
 * Question: Is this identification correct?
 * Since the manifest variables are scaled, should I force all manifest means in the estimation to 0?
 
-# Discussion: Order of Regressors
+# Discussion: Order of MAnifest Variables
 
-One possible problem is that the order of the regressors seems to impact the model results. For example, in the following section, I run the same model but only change the order of the regressors:
+One possible problem is that the order of the manifest seems to impact the model results unecpectedly. For example, in the following section, I run the same model but only change the order of the manifest variables:
 
 ## Model 1: Median Salary First, MA \% second 
 
@@ -187,6 +191,8 @@ model = ctModel(type='stanct',
 
 ```
 
+\newpage
+
 \FloatBarrier
 
 ```{r}
@@ -204,8 +210,259 @@ fit = ctStanFit(datalong = dff,
 
 cat(paste0('\\begin{sidewaysfigure}'))
 cat(ctModelLatex(fit,textsize = 'small',compile = FALSE, equationonly = TRUE))
-cat('\\caption{Both on}
+cat('\\caption{Salary First, Education Second}
 \\label{fig:ctmodellatexout}
 \\end{sidewaysfigure}') 
 
 ```
+
+\FloatBarrier
+
+### Model 1 Kalmman Plot, median salary first
+
+\FloatBarrier
+
+```{r, echo = TRUE, fig.height=5, fig.width=8}
+
+ctKalman(fit, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+As we see in the Kalman plot, capacity seems to follow the med_sal_ trend. Most of the error bands are in ma_pct. This pattern changes, however, if I change the order of the manifest variables.
+
+\FloatBarrier
+
+## Model 2: MA\% First, Median Salary Second
+
+\FloatBarrier
+
+```{r}
+
+## Make Strings for the model
+## based on the number of regressors
+lambdas = c(1)
+manifest = c(0)
+for (i in 2:length(regressors)) {
+  
+  temp = paste0("lambda", i)
+  temp2 = paste0("manifestmean", i)
+  lambdas[i] = temp
+  manifest[i] = temp2
+}
+
+```
+
+
+```{r, echo = TRUE}
+
+# Switch order of regressors
+regressors = c("ma_pct", "med_sal_")
+
+# The is the model specification
+model = ctModel(type='stanct', 
+               
+               LAMBDA=matrix(lambdas,
+                             nrow = length(regressors), 
+                             ncol = 1), # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               MANIFESTMEANS = matrix(manifest,
+                                      nrow = length(regressors), 
+                                      ncol = 1), # Forcing the first mean to be 0
+               
+               n.latent=1,
+               
+               latentNames=c('capacity'),
+               
+               CINT = matrix('cint'),
+               
+               id = "agy_full",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit2 = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+```
+
+\newpage
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit2,textsize = 'small',compile = FALSE, equationonly = TRUE))
+cat('\\caption{Education First, Salary Second}
+\\label{fig:ctmodellatexout1}
+\\end{sidewaysfigure}') 
+
+```
+
+
+\FloatBarrier
+
+\newpage
+
+### Model 2: Kalman Plot, MA \% first
+
+\FloatBarrier
+
+```{r, echo = TRUE, fig.height=5, fig.width=8}
+
+ctKalman(fit2, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+Counter to model 1, capacity now follows the MA_pct trend instead of the med_sal_ trend. The uncertainty bars have moved from education to salary as well. My thought is that the order of the manifest variables shouldn't impact the capacity trend, or affect the se on the manifest plots. 
+
+# Add autonomy (second latent variable)
+
+Eventually, would like to build up to adding a second latent variable, autonomy. We are also interested in the cross-effect. How does the autonomy at time $t$ affect the capacity of an agency at future time points?
+
+```{r}
+
+# Choose Year Range
+startyear = 1991 # Needs to be >=1974
+endyear = 2010 # Needs to be <=2019
+
+# Choose Agency Type
+agencytype = c("Natural Resources and Environment")
+# agencytype = c("Natural Resources and Environment",
+#                "Health")
+
+# Choose Manifest Variables 
+regressors = c("ma_pct", "med_sal_", "n", "appt_pct", "sup_appt_pct")
+# names(fed)
+
+# Choose Minimum Employee Size
+minemployee = 5000
+
+
+```
+
+```{r}
+
+# Data Clean
+df = fed %>%
+  filter(yr >= 1974) %>%
+  filter(med_sal_ > 0) %>% 
+  filter(n > minemployee) %>%
+  drop_na(med_sal_) %>% ### Am dropping NA here, but may not need to with ctsem
+  filter(AGYSUB != "TOTL") %>% ### Removes Total Rows 
+  filter(!grepl("NET", agy_full)) ### Removes any total agency counts, ie only individual agencies are left
+
+# Data Process
+years = startyear:endyear
+dff = df %>%
+  filter(agy_typ %in% agencytype) %>%
+  filter(yr %in% startyear:endyear) %>%
+  select(regressors, yr, AGYSUB, agy_full) %>%
+  mutate_at(regressors, scale) %>%
+  drop_na() ### Again, dropping NA here, but may not need to
+
+```
+
+```{r}
+
+## Make Strings for the model
+## based on the number of regressors
+manifest = c(0)
+for (i in 2:length(regressors)) {
+  temp2 = paste0("manifestmean", i)
+  manifest[i] = temp2
+}
+
+```
+
+
+```{r, echo = TRUE}
+
+lambda = matrix(c(1,"lam21", "lam31", 0, 0, 0, 0 , 0, 1, "lam52"), nrow = 5, ncol = 2)
+
+
+model = ctModel(type='stanct', 
+               
+               LAMBDA=lambda, # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               MANIFESTMEANS = matrix(manifest,
+                                      nrow = length(regressors), 
+                                      ncol = 1), # Forcing the first mean to be 0
+               
+               n.latent=2,
+               
+               latentNames=c('capactiy', "autonomy"),
+               
+               CINT = matrix(c('cint1', "cint2"), nrow = 2),
+               
+               id = "AGYSUB",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit3 = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit3,textsize = 'small',compile = FALSE, equationonly = TRUE, digits = 3))
+cat('\\caption{Autonomy and Capactiy}
+\\label{fig:ctmodellatexout}
+\\end{sidewaysfigure}') 
+
+```
+
+\FloatBarrier
+
+```{r, echo = TRUE, fig.height=5, fig.width=8}
+
+ctKalman(fit3, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+\FloatBarrier
+
+```{r}
+
+plot(fit3)[[1]]
+
+```
+
+## Interpretting Results
