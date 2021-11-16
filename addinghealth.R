@@ -14,7 +14,7 @@ set.seed(3710)
 
 
 # Choose Year Range
-startyear = 1991 # Needs to be >=1974
+startyear = 1981 # Needs to be >=1974
 endyear = 2010 # Needs to be <=2019
 
 # Choose Agency Type
@@ -26,7 +26,7 @@ regressors = c("ma_pct", "med_sal_")
 # names(fed)
 
 # Choose Minimum Employee Size
-minemployee = 5000
+minemployee = 3000
 
 
 # Data Clean
@@ -60,7 +60,7 @@ for (i in 2:length(regressors)) {
   manifest[i] = temp2
 }
 
-dff$yr = dff$yr - 1990
+dff$yr = dff$yr - 1980
 
 # The is the model specification
 model = ctModel(type='stanct', 
@@ -92,7 +92,7 @@ mafit = ctStanFit(datalong = dff,
                 ctstanmodel = model,
                 chains = 4,
                 cores = 4,
-                iter = 1000,
+                iter = 4000,
                 optimize = FALSE,
                 nopriors = FALSE,
                 control = list())
@@ -107,7 +107,7 @@ set.seed(3710)
 
 
 # Choose Year Range
-startyear = 1991 # Needs to be >=1974
+startyear = 1981 # Needs to be >=1974
 endyear = 2010 # Needs to be <=2019
 
 # Choose Agency Type
@@ -119,7 +119,7 @@ regressors = c("med_sal_", "ma_pct")
 # names(fed)
 
 # Choose Minimum Employee Size
-minemployee = 5000
+minemployee = 3000
 
 
 # Data Clean
@@ -153,7 +153,7 @@ for (i in 2:length(regressors)) {
   manifest[i] = temp2
 }
 
-dff$yr = dff$yr - 1990
+dff$yr = dff$yr - 1980
 
 # The is the model specification
 model = ctModel(type='stanct', 
@@ -185,7 +185,7 @@ salfit = ctStanFit(datalong = dff,
                   ctstanmodel = model,
                   chains = 4,
                   cores = 4,
-                  iter = 1000,
+                  iter = 4000,
                   optimize = FALSE,
                   nopriors = FALSE,
                   control = list())
