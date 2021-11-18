@@ -1,0 +1,751 @@
+---
+title: "Continuous-Time Dynamic Latent Model Specification"
+author: "Blain Morin"
+date: "10/29/2021"
+output: pdf_document
+urlcolor: blue
+header-includes:
+   - \usepackage{geometry}
+   - \usepackage{placeins}
+   - \usepackage{amsmath} 
+   - \usepackage{bm}
+   - \usepackage{lscape}
+   - \usepackage{rotating}
+   - \newcommand{\vect}[1]{\boldsymbol{\mathbf{#1}}}
+   - \newcommand{\blandscape}{\begin{landscape}}
+   - \newcommand{\elandscape}{\end{landscape}}
+---
+
+
+# One-sentence summary
+
+We are interested in measuring the latent capacity and autonomy of federal agencies over time.
+
+# Why capacity and autonomy?
+
+* *Capacity*: Ability of the state to induce residents, firms, and organizations to act in ways they would otherwise not.
+
+* *Autonomy*: Measures the politicization of the bureaucracy. How much control do elected officials have over bureaucrats?
+
+* These characteristics may be associated with governance outcomes.
+
+  * Ex.) Are capacity and automony of the Environmental Protection Agency related to their enforment work?
+
+* Is there heterogeneity across agencies?
+
+  * Ex.) Has the environmental state been hollowed out during the last few years?
+
+* Call in the political science literature for better conceptual clarity and measurement of these latent characteristics.
+
+* Prior work is cross-sectional. Need to understand how capacity and autonomy interact. 
+
+# Data
+
+* Individual-level employment data from all federal agencies over the past 40 years
+
+* Can observe characteristics such as years of service, education level, and salary of individual employees at every agency
+
+* Group these observations to the agency,year to get measures such as \% of employees with a master's degree or higher or average length of service (*our manifest variables*).
+
+* Can be used to replicate others' work on measurement, or propose our own list of relevant manifest variables.
+
+# Simple Test Set
+
+
+* Starting simple, I first try to model capacity using two manifest variables, \% of employees at an agency who have a master's degree or higher (*ma_pct*) and median salary at the agency (*med_sal_*)  
+
+* Using only larger Environmental Agencies where the number of employees > 5000
+
+* 30 years
+
+* See Table 1: we have 11 agencies, each with a fully balanced 30 observations
+
+
+```{r setup, include=FALSE}
+
+### Document Settings
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, cache = TRUE)
+
+### Packages
+library(tidyverse)
+library(ctsem)
+library(rstan)
+library(kableExtra)
+
+### Raw Data
+fed = read.csv("https://www.dropbox.com/s/xtt4emmz6txtbun/fed_agency_capacity_autonomy.csv?dl=1")
+
+### Set Seed
+set.seed(3710)
+
+
+```
+
+```{r}
+
+# Choose Year Range
+startyear = 1981 # Needs to be >=1974
+endyear = 2010 # Needs to be <=2019
+
+# Choose Agency Type
+agencytype = c("Natural Resources and Environment")
+# agencytype = c("Natural Resources and Environment",
+#                "Health")
+
+# Choose Manifest Variables 
+regressors = c("ma_pct", "med_sal_")
+# names(fed)
+
+# Choose Minimum Employee Size
+minemployee = 5000
+
+
+```
+
+```{r}
+
+# Data Clean
+df = fed %>%
+  filter(yr >= 1974) %>%
+  filter(med_sal_ > 0) %>% 
+  filter(n > minemployee) %>%
+  drop_na(med_sal_) %>% ### Am dropping NA here, but may not need to with ctsem
+  filter(AGYSUB != "TOTL") %>% ### Removes Total Rows 
+  filter(!grepl("NET", agy_full)) ### Removes any total agency counts, ie only individual agencies are left
+
+# Data Process
+years = startyear:endyear
+dff = df %>%
+  filter(agy_typ %in% agencytype) %>%
+  filter(yr %in% startyear:endyear) %>%
+  select(regressors, yr, AGYSUB, agy_full) %>%
+  mutate_at(regressors, scale) %>%
+  drop_na() ### Again, dropping NA here, but may not need to
+
+check = dff %>%
+  group_by(agy_full, AGYSUB) %>%
+  summarise(n_obs = n())
+
+kbl(check, caption = "Agencies and Number of Observations for 1991 - 2010", booktabs = TRUE, linesep = "")
+
+```
+
+
+# Simple Test Model
+
+* Using the *ctsem* package [Continuous time structural equation modeling with R](https://www.jstatsoft.org/article/view/v077i05), [Hierarchical Bayesian continuous time dynamic modeling](https://pubmed.ncbi.nlm.nih.gov/29595295/)
+
+```{r}
+
+## Make Strings for the model
+## based on the number of regressors
+lambdas = c(1)
+manifest = c(0)
+for (i in 2:length(regressors)) {
+  
+  temp = paste0("lambda", i)
+  temp2 = paste0("manifestmean", i)
+  lambdas[i] = temp
+  manifest[i] = temp2
+}
+
+```
+
+```{r}
+
+regressors = c("med_sal_", "ma_pct")
+
+# The is the model specification
+model = ctModel(type='stanct', 
+               
+               LAMBDA=matrix(lambdas,
+                             nrow = length(regressors), 
+                             ncol = 1), # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               MANIFESTMEANS = matrix(manifest,
+                                      nrow = length(regressors), 
+                                      ncol = 1), # Forcing the first mean to be 0
+               
+               n.latent=1,
+               
+               latentNames=c('capacity'),
+               
+               CINT = matrix('cint'),
+               
+               id = "agy_full",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit,textsize = 'small',compile = FALSE, equationonly = TRUE))
+cat('\\caption{Simple Test Model}
+\\label{fig:ctmodellatexout}
+\\end{sidewaysfigure}') 
+
+```
+
+\FloatBarrier
+
+```{r, fig.height=5, fig.width=8}
+
+ctKalman(fit, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+
+As we see in the Kalman plot, capacity seems to follow the med_sal_ trend. Most of the error bands are in ma_pct.
+
+\FloatBarrier
+
+# Identifiability Questions
+
+## Setting the Scale
+
+In figure 1, I've set $\Lambda[1,1] = 1$ to set the scale. With this specification, the capacity trend seems to follow the same trend as the manifest variable that was scaled to 1 (which in this case is med_sal_). If I instead scale ma_pct, then the capacity trend follows the ma_pct trend. In other words I am simply switching the order of the $Y(t)$ vector, as seen below:
+
+```{r}
+
+regressors = c("ma_pct", "med_sal_")
+
+# The is the model specification
+model = ctModel(type='stanct', 
+               
+               LAMBDA=matrix(lambdas,
+                             nrow = length(regressors), 
+                             ncol = 1), # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               MANIFESTMEANS = matrix(manifest,
+                                      nrow = length(regressors), 
+                                      ncol = 1), # Forcing the first mean to be 0
+               
+               n.latent=1,
+               
+               latentNames=c('capacity'),
+               
+               CINT = matrix('cint'),
+               
+               id = "agy_full",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit,textsize = 'small',compile = FALSE, equationonly = TRUE))
+cat('\\caption{Switch order of Y(t)}
+\\label{fig:ctmodellatexout1}
+\\end{sidewaysfigure}') 
+
+```
+
+\FloatBarrier
+
+```{r, fig.height=5, fig.width=8}
+
+ctKalman(fit, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+In the plot, the capacity trend now follows ma_pct instead of med_sal_. The error bars on the manifest variables have switched as well. I don't think the shape of the capacity trend should change, but it does. Not sure how to explain this?
+
+\FloatBarrier
+
+## Setting the location
+
+In the above examples, I've set the location by setting $\tau[1,1] = 0$. It seems the location could alternatively by specified by setting the continuous time intercept, $b = 0$. I am interpreting this intercept as the long term trend that the capacity process fluctuates around. 
+
+```{r}
+
+## Make Strings for the model
+## based on the number of regressors
+lambdas = c(1)
+manifest = c(0)
+for (i in 2:length(regressors)) {
+  
+  temp = paste0("lambda", i)
+  temp2 = paste0("manifestmean", i)
+  lambdas[i] = temp
+  manifest[i] = temp2
+}
+
+```
+
+```{r}
+
+regressors = c("med_sal_", "ma_pct")
+
+# The is the model specification
+model = ctModel(type='stanct', 
+               
+               LAMBDA=matrix(lambdas,
+                             nrow = length(regressors), 
+                             ncol = 1), # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               n.latent=1,
+               
+               latentNames=c('capacity'),
+               
+               id = "agy_full",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit,textsize = 'small',compile = FALSE, equationonly = TRUE))
+cat('\\caption{Setting location with CINT}
+\\label{fig:ctmodellatexout3}
+\\end{sidewaysfigure}') 
+
+```
+
+\FloatBarrier
+
+```{r, fig.height=5, fig.width=8}
+
+ctKalman(fit, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+I would expect Environmental Protection Agency to have a higher and increasing capacity estimate, but here it is the lowest and increasing. 
+
+\FloatBarrier
+
+# Add autonomy (second latent variable)
+
+Eventually, would like to build up to adding a second latent variable, autonomy. We are also interested in the cross-effect. How does the autonomy at time $t$ affect the capacity of an agency at future time points and vice versa?
+
+Just as an example here, I use standardized percentage of employees that are political appointments, *appt_pct*, and the percentage of employees that are political appointments in supervisory roles, *sup_appt_pct*. 
+
+```{r}
+
+# Choose Year Range
+startyear = 1991 # Needs to be >=1974
+endyear = 2010 # Needs to be <=2019
+
+# Choose Agency Type
+agencytype = c("Natural Resources and Environment")
+# agencytype = c("Natural Resources and Environment",
+#                "Health")
+
+# Choose Manifest Variables 
+regressors = c("ma_pct", "med_sal_", "appt_pct", "sup_appt_pct")
+# names(fed)
+
+# Choose Minimum Employee Size
+minemployee = 5000
+
+
+```
+
+```{r}
+
+# Data Clean
+df = fed %>%
+  filter(yr >= 1974) %>%
+  filter(med_sal_ > 0) %>% 
+  filter(n > minemployee) %>%
+  drop_na(med_sal_) %>% ### Am dropping NA here, but may not need to with ctsem
+  filter(AGYSUB != "TOTL") %>% ### Removes Total Rows 
+  filter(!grepl("NET", agy_full)) ### Removes any total agency counts, ie only individual agencies are left
+
+# Data Process
+years = startyear:endyear
+dff = df %>%
+  filter(agy_typ %in% agencytype) %>%
+  filter(yr %in% startyear:endyear) %>%
+  select(regressors, yr, AGYSUB, agy_full) %>%
+  mutate_at(regressors, scale) %>%
+  drop_na() ### Again, dropping NA here, but may not need to
+
+```
+
+```{r}
+
+## Make Strings for the model
+## based on the number of regressors
+manifest = c(0)
+for (i in 2:length(regressors)) {
+  temp2 = paste0("manifestmean", i)
+  manifest[i] = temp2
+}
+
+```
+
+
+```{r}
+
+lambda = matrix(c(1,"lam21", 0, 0, 0, 0 , 1, "lam52"), nrow = 4, ncol = 2)
+
+
+model = ctModel(type='stanct', 
+               
+               LAMBDA=lambda, # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               MANIFESTMEANS = matrix(manifest,
+                                      nrow = length(regressors), 
+                                      ncol = 1), # Forcing the first mean to be 0
+               
+               n.latent=2,
+               
+               latentNames=c('capactiy', "autonomy"),
+               
+               CINT = matrix(c('cint1', "cint2"), nrow = 2),
+               
+               id = "AGYSUB",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit3 = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit3,textsize = 'small',compile = FALSE, equationonly = TRUE, digits = 3))
+cat('\\caption{Autonomy and Capactiy}
+\\label{fig:ctmodellatexout}
+\\end{sidewaysfigure}') 
+
+```
+
+\FloatBarrier
+
+```{r, fig.height=5, fig.width=8}
+
+ctKalman(fit3, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+
+# Non-stationary Manifest Variables
+
+* Is it a problem that the manifest variables are non-stationary?
+* In the model below, I take the first differences to make the manifest variables stationary:
+
+```{r}
+
+# Choose Year Range
+startyear = 1991 # Needs to be >=1974
+endyear = 2010 # Needs to be <=2019
+
+# Choose Agency Type
+agencytype = c("Natural Resources and Environment")
+# agencytype = c("Natural Resources and Environment",
+#                "Health")
+
+# Choose Manifest Variables 
+regressors = c("ma_pct", "med_sal_", "appt_pct", "expert_pct")
+# names(fed)
+
+# Choose Minimum Employee Size
+minemployee = 5000
+
+
+```
+
+```{r}
+
+# Data Clean
+df = fed %>%
+  filter(yr >= 1974) %>%
+  filter(med_sal_ > 0) %>% 
+  filter(n > minemployee) %>%
+  drop_na(med_sal_) %>% ### Am dropping NA here, but may not need to with ctsem
+  filter(AGYSUB != "TOTL") %>% ### Removes Total Rows 
+  filter(!grepl("NET", agy_full)) ### Removes any total agency counts, ie only individual agencies are left
+
+# Data Process
+years = startyear:endyear
+dff = df %>%
+  filter(agy_typ %in% agencytype) %>%
+  filter(yr %in% startyear:endyear) %>%
+  select(regressors, yr, AGYSUB, agy_full) %>%
+  mutate_at(regressors, scale) %>%
+  drop_na() ### Again, dropping NA here, but may not need to
+
+```
+
+```{r}
+
+f = function(x){
+  a = diff(x)
+  b = 0
+  return(c(b, a))
+}
+
+dfff = dff %>%
+  group_by(AGYSUB) %>%
+  mutate_at(regressors, f) %>%
+  ungroup()
+
+```
+
+
+```{r}
+
+lambda = matrix(c(1,"lam21", 0, 0, 0 , 0, 1, "lam52"), nrow = 4, ncol = 2)
+
+
+model = ctModel(type='stanct', 
+               
+               LAMBDA=lambda, # Forcing the first factor load to be 1
+               
+               n.manifest=length(regressors),
+               
+               manifestNames = regressors,
+               
+               n.latent=2,
+               
+               latentNames=c('capactiy', "autonomy"),
+               
+               CINT = matrix(c(0, 0), nrow = 2), # Set scale by forcing these to 0
+               
+               id = "AGYSUB",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit = ctStanFit(datalong = dfff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit,textsize = 'small',compile = FALSE, equationonly = TRUE, digits = 3))
+cat('\\caption{Autonomy and Capactiy First Differences}
+\\label{fig:ctmodellatexout}
+\\end{sidewaysfigure}') 
+
+```
+
+\FloatBarrier
+
+```{r, echo = TRUE, fig.height=5, fig.width=8}
+
+ctKalman(fit, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+\FloatBarrier
+
+# Formative Versus Reflective
+
+* In all the examples I've looked at, the manifest variables reflect the latent process (reflective model). When thinking about capacity and autonomy, the manifest variables here seem to form the latent process (formative model).
+
+* As an alternate specification, I model each each variable as its own process:
+
+```{r}
+
+# Choose Year Range
+startyear = 1991 # Needs to be >=1974
+endyear = 2010 # Needs to be <=2019
+
+# Choose Agency Type
+agencytype = c("Natural Resources and Environment")
+# agencytype = c("Natural Resources and Environment",
+#                "Health")
+
+# Choose Manifest Variables 
+regressors = c("ma_pct", "med_sal_", "appt_pct", "expert_pct")
+# names(fed)
+
+# Choose Minimum Employee Size
+minemployee = 5000
+
+
+```
+
+```{r}
+
+# Data Clean
+df = fed %>%
+  filter(yr >= 1974) %>%
+  filter(med_sal_ > 0) %>% 
+  filter(n > minemployee) %>%
+  drop_na(med_sal_) %>% ### Am dropping NA here, but may not need to with ctsem
+  filter(AGYSUB != "TOTL") %>% ### Removes Total Rows 
+  filter(!grepl("NET", agy_full)) ### Removes any total agency counts, ie only individual agencies are left
+
+# Data Process
+years = startyear:endyear
+dff = df %>%
+  filter(agy_typ %in% agencytype) %>%
+  filter(yr %in% startyear:endyear) %>%
+  select(regressors, yr, AGYSUB, agy_full) %>%
+  mutate_at(regressors, scale) %>%
+  drop_na() ### Again, dropping NA here, but may not need to
+
+```
+
+```{r}
+
+lambda = diag(nrow = 4)
+
+
+model = ctModel(type='stanct', 
+               
+               LAMBDA=lambda, # Forcing the first factor load to be 1
+               
+               n.manifest= length(regressors),
+               
+               manifestNames = regressors,
+               
+               n.latent = 4,
+               
+               latentNames= c("master", "salary", "appointed", "expert"),
+               
+               MANIFESTMEANS = matrix(c(0, 0, 0, 0), nrow = 4),
+               
+               CINT = matrix(c("cint1", "cint2", "cint3", "cint4"), nrow = 4), # Set scale by forcing these to 0
+               
+               id = "AGYSUB",
+               
+               time = "yr")
+
+```
+
+```{r}
+
+fit = ctStanFit(datalong = dff,
+                ctstanmodel = model,
+                optimize = TRUE,
+                nopriors = FALSE)
+
+
+```
+
+\FloatBarrier
+
+```{r, results='asis'}
+
+cat(paste0('\\begin{sidewaysfigure}'))
+cat(ctModelLatex(fit,textsize = 'small',compile = FALSE, equationonly = TRUE, digits = 3))
+cat('\\caption{Formative Model}
+\\label{fig:ctmodellatexout}
+\\end{sidewaysfigure}') 
+
+```
+
+
+\FloatBarrier
+
+```{r, fig.height=5, fig.width=8}
+
+ctKalman(fit, 
+         plot = TRUE,
+         subjects = (1:length(unique(dff$AGYSUB))), # Plots all agencies
+         kalmanvec = c("etasmooth", "y", "ysmooth"),
+         timestep = .5) 
+
+```
+
+\FloatBarrier
+
+In the formative-ish model specification, we are particularly interested in the cross lag effects, which is the first plot in the following list of plots:
+
+```{r}
+
+plot(fit)
+
+```
+
